@@ -27,8 +27,8 @@ vagrant_synced_folders:
     type: nfs
     create: true
 
-  - local_path: ~/oah-sites/oahvm
-    destination: /var/www/oahvm
+  - local_path: ~/oah-sites/{{ vagrant_machine_name }}
+    destination: /var/www/{{ vagrant_machine_name }}
     type: nfs
     create: true
 
@@ -59,13 +59,13 @@ oahvm_cron_jobs: []
 apache_vhosts:
 
 
-  - servername: "adminer.oahvm.dev"
+  - servername: "adminer.{{ vagrant_machine_name }}.dev"
     documentroot: "/opt/adminer"
 
-  - servername: "xhprof.oahvm.dev"
+  - servername: "xhprof.{{ vagrant_machine_name }}.dev"
     documentroot: "/usr/share/php/xhprof_html"
 
-  - servername: "pimpmylog.oahvm.dev"
+  - servername: "pimpmylog.{{ vagrant_machine_name }}.dev"
     documentroot: "/usr/share/php/pimpmylog"
 
 apache_remove_default_vhost: true
@@ -78,15 +78,15 @@ apache_mods_enabled:
 # here. Set the 'is_php' property for document roots that contain PHP apps like
 # Drupal.
 nginx_hosts:
-  - server_name: "adminer.oahvm.dev"
+  - server_name: "adminer.{{ vagrant_machine_name }}.dev"
     root: "/opt/adminer"
     is_php: true
 
-  - server_name: "xhprof.oahvm.dev"
+  - server_name: "xhprof.{{ vagrant_machine_name }}.dev"
     root: "/usr/share/php/xhprof_html"
     is_php: true
 
-  - server_name: "pimpmylog.oahvm.dev"
+  - server_name: "pimpmylog.{{ vagrant_machine_name }}.dev"
     root: "/usr/share/php/pimpmylog"
     is_php: true
 
