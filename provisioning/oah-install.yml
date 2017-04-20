@@ -1,6 +1,9 @@
 ---
 - hosts: all
 
+  vars:
+  - ove_command: install
+
   vars_files:
     - ../oah-config.yml
 
@@ -10,6 +13,7 @@
 
   roles:
     # Essential roles.
+    - oah.oah
     - oah.firewall
     - oah.git
     - oah.postfix

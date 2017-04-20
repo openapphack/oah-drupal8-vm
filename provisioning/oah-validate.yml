@@ -2,10 +2,11 @@
 - hosts: all
 
   vars:
-  - ove_command: remove
+  - ove_command: validate
 
   vars_files:
     - ../oah-config.yml
+
 
   pre_tasks:
     - include: tasks/init-debian.yml

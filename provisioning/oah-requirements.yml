@@ -1,7 +1,7 @@
 ---
 - src: https://github.com/openapphack/ansible-role-oah
   version: master
-  name: oah
+  name: oah.oah
 - src: https://github.com/openapphack/ansible-role-oah-selenium
   version: master
   name: oah.selenium
