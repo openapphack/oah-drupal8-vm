@@ -2,7 +2,8 @@
 # environment Name
 env_name: oah-drupal8-vm
 # `vagrant_box` .
-vagrant_box: virtualenv/ubuntu1404
+#vagrant_box: virtualenv/ubuntu1404
+vagrant_box: "bento/ubuntu-16.04"
 vagrant_user: vagrant
 oah_user: oahdev
 
