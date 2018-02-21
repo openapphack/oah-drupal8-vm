@@ -1,5 +1,8 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
+# Use oah-config.yml for basic VM configuration.
+require 'yaml'
+
 VAGRANTFILE_API_VERSION = "2"
 Vagrant.require_version '>= 1.8.1'
 
@@ -16,17 +19,212 @@ def which(cmd)
   return nil
 end
 
-# Use oah-config.yml for basic VM configuration.
-require 'yaml'
 
+
+# Recursively walk an tree and run provided block on each value found.
+def walk(obj, &fn)
+  if obj.is_a?(Array)
+    obj.map { |value| walk(value, &fn) }
+  elsif obj.is_a?(Hash)
+    obj.each_pair { |key, value| obj[key] = walk(value, &fn) }
+  else
+    obj = yield(obj)
+  end
+end
+
+# Resolve jinja variables in hash.
+def resolve_jinja_variables(vconfig)
+  walk(vconfig) do |value|
+    while value.is_a?(String) && value.match(/{{ .* }}/)
+      value = value.gsub(/{{ (.*?) }}/) { vconfig[Regexp.last_match(1)] }
+    end
+    value
+  end
+end
+
+# Return the combined configuration content all files provided.
+def load_config(files)
+  vconfig = {}
+  files.each do |config_file|
+    if File.exist?(config_file)
+      optional_config = YAML.load_file(config_file)
+      vconfig.merge!(optional_config) if optional_config
+    end
+  end
+  resolve_jinja_variables(vconfig)
+end
+
+# Return the path to the ansible-playbook executable.
+def ansible_bin
+  @ansible_bin ||= which('ansible-playbook')
+end
+
+# Return the ansible version parsed from running the executable path provided.
+def ansible_version
+  /^[^\s]+ (.+)$/.match(`#{ansible_bin} --version`) { |match| return match[1] }
+end
+
+# Require that if installed, the ansible version meets the requirements.
+def require_ansible_version(requirement)
+  return unless ansible_bin
+  req = Gem::Requirement.new(requirement)
+  return if req.satisfied_by?(Gem::Version.new(ansible_version))
+  raise_message "You must install an Ansible version #{requirement} to use this version of Drupal VM."
+end
+
+def raise_message(msg)
+  raise Vagrant::Errors::VagrantError.new, msg
+end
+
+# Return which Vagrant provisioner to use.
+def vagrant_provisioner
+  ansible_bin ? :ansible : :ansible_local
+end
+
+def ensure_plugins(plugins)
+  logger = Vagrant::UI::Colored.new
+  installed = false
+
+  plugins.each do |plugin|
+    plugin_name = plugin['name']
+    manager = Vagrant::Plugin::Manager.instance
+
+    next if manager.installed_plugins.key?(plugin_name)
+
+    logger.warn("Installing plugin #{plugin_name}")
+
+    manager.install_plugin(
+      plugin_name,
+      sources: plugin.fetch('source', %w[https://rubygems.org/ https://gems.hashicorp.com/]),
+      version: plugin['version']
+    )
+
+    installed = true
+  end
+
+  return unless installed
+
+  logger.warn('`vagrant up` must be re-run now that plugins are installed')
+  exit
+end
+
+## OAH Apache specific function
+def get_apache_vhosts(vhosts)
+  aliases = []
+  vhosts.each do |host|
+    aliases.push(host['servername'])
+    aliases.concat(host['serveralias'].split) if host['serveralias']
+  end
+  aliases
+end
+
+## OAH Nginx specific function
+
+def get_nginx_vhosts(vhosts)
+  aliases = []
+  vhosts.each do |host|
+    aliases.push(host['server_name'])
+    aliases.concat(host['server_name_redirect'].split) if host['server_name_redirect']
+  end
+  aliases
+end
+
+# Return a list of all virtualhost server names and aliases from a config hash.
+def get_vhost_aliases(vconfig)
+  if vconfig['oah_webserver'] == 'apache'
+    aliases = get_apache_vhosts(vconfig['apache_vhosts'])
+  else
+    # @todo shim for `nginx_hosts`.
+    aliases = get_nginx_vhosts(vconfig.fetch('nginx_hosts', vconfig['nginx_vhosts']))
+  end
+  aliases = aliases.uniq - [vconfig['vagrant_ip']]
+  # Remove wildcard subdomains.
+  aliases.delete_if { |vhost| vhost.include?('*') }
+end
+
+# Return a default post_up_message.
+def get_default_post_up_message(vconfig)
+  'Your OAH Vagrant box is ready to use!'\
+    "\n* Visit the dashboard for an overview of your site: http://dashboard.#{vconfig['vagrant_hostname']} (or http://#{vconfig['vagrant_ip']})"\
+    "\n* You can SSH into your machine with `vagrant ssh`."\
+
+end
 
 #dir = File.dirname(File.expand_path(__FILE__))
-dir = File.dirname("../../../")
+# dir = File.dirname("../../../")
+#
+# if !File.exist?("#{dir}/oah-config.yml")
+#   raise "Configuration file #{dir}/oah-config.yml not found!  Please copy example.oah-config.yml to oah-config.yml and try again."
+# end
+# vconfig = YAML::load_file("#{dir}/oah-config.yml")
 
-if !File.exist?("#{dir}/oah-config.yml")
-  raise "Configuration file #{dir}/oah-config.yml not found!  Please copy example.oah-config.yml to oah-config.yml and try again."
+# oah_env_user defaults to vagrant unless set by the oah.user role
+oah_env_user = ENV['OAH_ENV_USER'] || "vagrant"
+# oah_user is the current user unless set by the oah.user role
+oah_user = ENV['OAH_USER'] || ENV['USERNAME']
+# Absolute paths on the host machine.
+#host_oah_dir = File.dirname(File.expand_path(__FILE__))
+# This is the folder where the environment repo has got checked out, three level above vagrantfile and one level about host folder
+host_oah_env_dir = File.dirname("../../../")
+# we will work about host_project_dir later for now it is same as host_oah_dir\
+host_project_dir = ENV['OAH_PROJECT_ROOT'] || host_oah_env_dir
+# config directory is same as the host_oah_env_dir or host_project_dir if a project dir is defined
+# if an overide configuration is specified it will as a subfolder specified by OAH_CONFIG_DIR
+host_config_dir = ENV['OAH_CONFIG_DIR'] ? "#{host_project_dir}/#{ENV['OAH_CONFIG_DIR']}" : host_project_dir
+
+
+#TODO add support for docker, runc and kubectl
+oah_env_type = ENV['OAH_ENV_TYPE'] || 'vagrant'
+
+default_config_file = "#{host_oah_dir}/default.oah-config.yml"
+unless File.exist?(default_config_file)
+  raise_message "Configuration file not found! Expected in #{default_config_file}"
 end
-vconfig = YAML::load_file("#{dir}/oah-config.yml")
+
+vconfig = load_config([
+  default_config_file,
+  "#{host_config_dir}/oah-config.yml",
+  "#{host_config_dir}/#{oah_env_type}.oah-config.yml",
+  "#{host_config_dir}/local.oah-config.yml"
+])
+
+# Absolute paths on the guest machine.
+#guest_project_dir = '/vagrant'
+# Will worry about guest project dir when feature of project level is include
+#guest_project_dir = '/{{ oah_env_user }}'
+#guest_oah_env_dir = ENV['OAH_DIR'] ? "/{{ oah_env_user }}/#{ENV['OAH_DIR']}/data/env/#{ENV['OAH_ENV_NAME']}" : guest_project_dir
+# Get env name from configuration file,
+# Do we need to check OAH_ENV_NAME environment variable as well ? can this be used to test switching environments
+oah_env_name = vconfig['oah_env_name']
+guest_oah_env_dir = "/#{oah_env_user}/#{ENV['OAH_DIR']}/data/env/#{oah_env_name}"
+guest_config_dir = ENV['OAH_CONFIG_DIR'] ? "#{guest_oah_env_dir}/#{ENV['OAH_CONFIG_DIR']}" : guest_oah_env_dir
+
+puts " oah_env_user => #{oah_env_user}"
+puts " oah_user => #{oah_user}"
+puts " host_oah_env_dir => #{host_oah_env_dir}"
+puts " host_config_dir => #{host_config_dir}"
+puts " host_project_dir => #{host_project_dir}"
+puts " guest_config_dir => #{guest_config_dir}"
+puts " guest_oah_env_dir => #{guest_oah_env_dir}"
+puts " oah_env_name => #{oah_env_name}"
+puts " oah_env_type => #{oah_env_type}"
+
+# install on host machine if force_ansible_local
+provisioner = vconfig['force_ansible_local'] ? :ansible_local : vagrant_provisioner
+if provisioner == :ansible
+  playbook = "#{host_oah_env_dir}/provisioning/playbook.yml"
+  config_dir = host_config_dir
+else
+  playbook = "#{guest_oah_env_dir}/provisioning/playbook.yml"
+  config_dir = guest_config_dir
+end
+
+# Verify version requirements.
+require_ansible_version ">= #{vconfig['oah_ansible_version_min']}"
+Vagrant.require_version ">= #{vconfig['oah_vagrant_version_min']}"
+
+ensure_plugins(vconfig['vagrant_plugins'])
+
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   config.vm.hostname = vconfig['vagrant_hostname']

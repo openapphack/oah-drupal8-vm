@@ -1,6 +1,6 @@
 ---
 # environment Name
-env_name: oah-drupal8-vm
+oah_env_name: oah-drupal8-vm
 # `vagrant_box` .
 #vagrant_box: virtualenv/ubuntu1404
 vagrant_box: "bento/ubuntu-16.04"
@@ -24,12 +24,12 @@ vagrant_public_ip: ""
 vagrant_synced_folders:
   # The first synced folder will be used for the default Drupal installation, if
   # build_makefile: is 'true'.
-  - local_path: ~/.oah/data
+  - local_path: {{ oah_dir }}/.oah/data
     destination: /home/{{ oah_user }}/.oah/data
     type: nfs
     create: true
 
-  - local_path: ~/oah-sites/{{ vagrant_machine_name }}
+  - local_path: {{ oah_dir }}/oah-sites/{{ vagrant_machine_name }}
     destination: /var/www/{{ vagrant_machine_name }}
     type: nfs
     create: true
